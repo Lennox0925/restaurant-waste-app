@@ -9,7 +9,7 @@ st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="ce
 
 # 請將下方網址替換為您的 Google 試算表網址
 # 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
-SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
+SHEET_URL = "docs.google.com"  #spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit
 
 # 建立 Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -104,23 +104,24 @@ if st.session_state.page == "登記":
                     "報廢原因": reason
                 }])
                 
+                # 建立連線 (它會自動去 Secrets 讀取設定)
+                conn = st.connection("gsheets", type=GSheetsConnection)
+
+                # --- 在登記儲存時 ---
                 try:
-                    # 讀取雲端當月工作表 (自動使用 Secrets 中的 spreadsheet 網址)
+                    # 僅指定 worksheet 名稱，不要傳入 spreadsheet=SHEET_URL
                     existing_data = conn.read(worksheet=month_sheet_name, ttl=0)
-                    # 合併舊資料與新資料
                     updated_df = pd.concat([existing_data, new_data], ignore_index=True)
                 except Exception:
-                    # 若該月份分頁尚未建立，則新資料就是第一筆
+                    # 如果找不到分頁，視為新分頁
                     updated_df = new_data
-                
-                # 寫回雲端 (Service Account 權限會自動處理新增工作表)
-                conn.update(worksheet=month_sheet_name, data=updated_df)
-                # ---------------------------------------------------------
 
-                # 儲存完成後，跳轉到紀錄頁面
-                st.session_state.page = "紀錄" 
-                st.session_state.step = 1
-                st.rerun()
+                # 更新雲端資料
+                conn.update(worksheet=month_sheet_name, data=updated_df)
+
+                # --- 在查看紀錄時 ---
+                history_df = conn.read(worksheet=month_sheet_name, ttl=0)
+
 
 # --- B. 紀錄頁面邏輯 ---
 elif st.session_state.page == "紀錄":
@@ -156,7 +157,6 @@ elif st.session_state.page == "紀錄":
             st.info(f"{month_sheet_name} 目前尚無資料")
     except Exception:
         st.warning(f"尚未建立 {month_sheet_name} 工作表，請先完成第一次登記。")
-
 
 
 
