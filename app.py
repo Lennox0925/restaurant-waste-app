@@ -131,14 +131,14 @@ if st.session_state.page == "登記":
 
     elif st.session_state.step == 3:
         st.info(f"📍 品項：{st.session_state.selected_item}")
-        weight = st.number_input("3. 輸入重量 (g)", min_value=0, step=50)
+        weight = st.number_input("3. 輸入重量 (g)", min_value="", step=50)
         if st.button("下一步：選擇原因 ➔", use_container_width=True, type="primary"):
             st.session_state.temp_weight = weight
             st.session_state.step = 4; st.rerun()
 
     elif st.session_state.step == 4:
         st.warning("最後一步：請選擇原因")
-        for r in ["基本損耗", "客人退貨", "品質不佳", "掉落地面"]:
+        for r in ["正常損耗", "客人退貨", "品質不佳", "掉落地面"]:
             if st.button(r, use_container_width=True):
                 new_row = pd.DataFrame([{
                     "輸入時間": get_taiwan_time().strftime("%Y-%m-%d %H:%M"),
@@ -174,7 +174,7 @@ elif st.session_state.page == "紀錄":
                 st.write(f"**品項：** {last_item['品項']} ({last_item['重量(g)']}g)")
                 st.write(f"**時間：** {last_item['輸入時間']}")
                 
-                if st.button("確認刪除並回首頁", type="primary", use_container_width=True):
+                if st.button("確認刪除並回歷史紀錄頁面", type="primary", use_container_width=True):
                     # 執行刪除
                     df_h = df_h.drop(df_h.index[-1])
                     df_h.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
@@ -189,10 +189,11 @@ elif st.session_state.page == "紀錄":
                     fid = upload_to_drive()
                     if fid: st.success(f"✅ 備份成功！檔案 ID: {fid}")
             
-            with st.expander("🛠️ 管理員功能"):
+            with st.expander("🛠️ 管理員功能(清空內容)"):
                 if st.text_input("管理密碼", type="password") == "85129111":
                     if st.button("清空本月本地資料"):
                         pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
                         st.success("資料已清空"); st.rerun()
         else:
             st.info("本月目前尚無資料")
+
