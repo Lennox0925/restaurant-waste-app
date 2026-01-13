@@ -9,7 +9,7 @@ st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="ce
 
 # 請將下方網址替換為您的 Google 試算表網址
 # 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
-SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
+SHEET_URL = "docs.google.com"
 
 # 建立 Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -105,16 +105,19 @@ if st.session_state.page == "登記":
                 }])
                 
                 try:
-                    # 讀取雲端同一個試算表中對應月份的分頁
-                    existing_data = conn.read(spreadsheet=SHEET_URL, worksheet=month_sheet_name)
+                    # 讀取雲端當月工作表 (自動使用 Secrets 中的 spreadsheet 網址)
+                    existing_data = conn.read(worksheet=month_sheet_name, ttl=0)
+                    # 合併舊資料與新資料
                     updated_df = pd.concat([existing_data, new_data], ignore_index=True)
                 except Exception:
-                    # 若該月份分頁尚未建立，則直接使用新資料
+                    # 若該月份分頁尚未建立，則新資料就是第一筆
                     updated_df = new_data
                 
-                # 寫回雲端 (若分頁不存在會自動建立)
-                conn.update(spreadsheet=SHEET_URL, worksheet=month_sheet_name, data=updated_df)
-                
+                # 寫回雲端 (Service Account 權限會自動處理新增工作表)
+                conn.update(worksheet=month_sheet_name, data=updated_df)
+                # ---------------------------------------------------------
+
+                # 儲存完成後，跳轉到紀錄頁面
                 st.session_state.page = "紀錄" 
                 st.session_state.step = 1
                 st.rerun()
