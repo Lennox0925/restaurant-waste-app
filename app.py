@@ -3,126 +3,164 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# 1. 基本設定與 CSS 優化（適合手機觸控）
-st.set_page_config(page_title="餐廳報廢系統", layout="centered")
+# 設定檔案路徑
+DATA_FILE = 'waste_records.csv'
+MENU_FILE = 'menu.csv'
 
-# 使用 CSS 讓按鈕高度增加，方便手機點選
+# --- 設定頁面與樣式 ---
+st.set_page_config(page_title="餐廳報廢系統", layout="centered")
 st.markdown("""
     <style>
-    div.stButton > button {
-        height: 3em;
-        font-size: 1.1rem !important;
-        margin-bottom: 10px;
-    }
-    .stNumberInput input {
-        font-size: 1.5rem !important;
-        height: 3em !important;
-    }
+    div.stButton > button { height: 3.5em; font-size: 1.1rem !important; margin-bottom: 10px; }
+    .stNumberInput input { font-size: 1.5rem !important; height: 3em !important; }
+    .stAlert { font-size: 1.2rem !important; }
     </style>
     """, unsafe_allow_html=True)
 
-DATA_FILE = 'waste_records.csv'
-DATA_MAP = {
-    "大成食品": ["雞胸肉", "雞腿排", "雞翅"],
-    "農夫市集": ["高麗菜", "牛番茄", "洋蔥", "青花菜"],
-    "海鮮大王": ["草蝦", "鮭魚切片", "蛤蜊"],
-    "調味專家": ["橄欖油", "黑胡椒", "玫瑰鹽"]
-}
+# --- 讀取外部選單資料 ---
+@st.cache_data
+def load_menu():
+    if os.path.exists(MENU_FILE):
+        try:
+            df_menu = pd.read_csv(MENU_FILE)
+            return df_menu
+        except:
+            st.error("menu.csv 讀取失敗，請檢查編碼或欄位")
+            return pd.DataFrame(columns=["類別", "廠商", "品項"])
+    return pd.DataFrame(columns=["類別", "廠商", "品項"])
 
-# 初始化 Session State
+df_menu_raw = load_menu()
+
+# --- 初始化 Session State ---
+if 'page' not in st.session_state: st.session_state.page = "登記"
+if 'step' not in st.session_state: st.session_state.step = 1
+if 'selected_cat' not in st.session_state: st.session_state.selected_cat = None
 if 'selected_vendor' not in st.session_state: st.session_state.selected_vendor = None
 if 'selected_item' not in st.session_state: st.session_state.selected_item = None
-if 'show_reasons' not in st.session_state: st.session_state.show_reasons = False
-if 'temp_record' not in st.session_state: st.session_state.temp_record = {}
 
-# 確保 CSV 存在
+# 確保紀錄檔存在且欄位正確
+COLUMNS = ["輸入時間", "類別", "廠商", "品項", "重量(g)", "報廢原因"]
 if not os.path.exists(DATA_FILE):
-    df_init = pd.DataFrame(columns=["輸入時間", "廠商", "品項", "重量(g)", "報廢原因"])
-    df_init.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+    pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
 
-# --- 2. 頁面分頁設計 (適合平板切換) ---
-tab1, tab2 = st.tabs(["📝 報廢登記", "📊 歷史紀錄"])
+# --- 頁面邏輯切換 ---
+col_nav1, col_nav2 = st.columns(2)
+if col_nav1.button("📝 進入登記"): 
+    st.session_state.page = "登記"
+    st.rerun()
+if col_nav2.button("📊 查看紀錄"): 
+    st.session_state.page = "紀錄"
+    st.rerun()
 
-with tab1:
-    st.header("餐廳報廢登記")
+st.divider()
 
-    # 步驟 1: 選擇廠商 (按鈕改為 2 列排版適合手機)
-    st.subheader("1. 選擇廠商")
-    vendors = list(DATA_MAP.keys())
-    v_cols = st.columns(2) 
-    for i, v_name in enumerate(vendors):
-        with v_cols[i % 2]:
-            if st.button(v_name, use_container_width=True):
-                st.session_state.selected_vendor = v_name
-                st.session_state.selected_item = None
-                st.session_state.show_reasons = False
+# --- A. 登記頁面 ---
+if st.session_state.page == "登記":
+    st.header("🍎 報廢登記")
+    
+    # 步驟 1: 選擇類別
+    if st.session_state.step == 1:
+        st.info("💡 提示：當月 1 號輸入前請先前往紀錄頁清除資料")
+        st.subheader("1. 選擇商品類別")
+        categories = df_menu_raw["類別"].unique()
+        v_cols = st.columns(2)
+        for i, cat_name in enumerate(categories):
+            with v_cols[i % 2]:
+                if st.button(cat_name, use_container_width=True):
+                    st.session_state.selected_cat = cat_name
+                    st.session_state.step = 2 # 直接跳到選擇品項
+                    st.rerun()
 
-    # 步驟 2: 選擇品項
-    if st.session_state.selected_vendor:
-        st.divider()
-        st.subheader(f"2. 選擇品項 ({st.session_state.selected_vendor})")
-        items = DATA_MAP[st.session_state.selected_vendor]
+    # 步驟 2: 選擇品項 (直接從類別跳過來)
+    elif st.session_state.step == 2:
+        st.subheader(f"2. 選擇品項 ({st.session_state.selected_cat})")
+        # 抓取該類別下所有的品項與其對應的廠商
+        category_items = df_menu_raw[df_menu_raw["類別"] == st.session_state.selected_cat]
+        
         i_cols = st.columns(2)
-        for i, item_name in enumerate(items):
+        for i, (idx, row) in enumerate(category_items.iterrows()):
             with i_cols[i % 2]:
-                if st.button(item_name, use_container_width=True):
-                    st.session_state.selected_item = item_name
-                    st.session_state.show_reasons = False
+                # 顯示品項名稱，點擊時同時儲存該品項所屬的廠商
+                if st.button(row["品項"], use_container_width=True, key=f"item_{idx}"):
+                    st.session_state.selected_item = row["品項"]
+                    st.session_state.selected_vendor = row["廠商"]
+                    st.session_state.step = 3
+                    st.rerun()
+        
+        if st.button("⬅️ 返回重選類別", use_container_width=True):
+            st.session_state.step = 1
+            st.rerun()
 
     # 步驟 3: 輸入重量
-    if st.session_state.selected_item:
-        st.divider()
-        st.info(f"📍 已選：{st.session_state.selected_vendor} / {st.session_state.selected_item}")
-        weight = st.number_input("3. 輸入重量 (克)", min_value=1, step=50, key="weight_input")
-        
-        if st.button("確認重量並選擇原因 ➔", type="primary", use_container_width=True):
-            st.session_state.temp_record = {
-                "輸入時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "廠商": st.session_state.selected_vendor,
-                "品項": st.session_state.selected_item,
-                "重量(g)": weight
-            }
-            st.session_state.show_reasons = True
+    elif st.session_state.step == 3:
+        st.info(f"📍 已選：{st.session_state.selected_cat} > {st.session_state.selected_item} (廠商: {st.session_state.selected_vendor})")
+        weight = st.number_input("3. 輸入重量 (克)", min_value=0, step=50, value=0)
+        if st.button("確認重量，選擇原因 ➔", type="primary", use_container_width=True):
+            st.session_state.temp_weight = weight
+            st.session_state.step = 4
+            st.rerun()
 
-    # 步驟 4: 報廢原因 (全螢幕大按鈕)
-    if st.session_state.get("show_reasons"):
-        st.markdown("---")
-        st.warning("最後一步：請點選報廢原因")
+    # 步驟 4: 選擇原因並送出
+    elif st.session_state.step == 4:
+        st.warning("最後一步：請選擇報廢原因")
         reasons = ["基本損耗", "客人退貨", "品質不佳", "掉落地面"]
-        
-        # 原因按鈕採用單欄大按鈕，方便大拇指點選
         for reason in reasons:
-            if st.button(reason, use_container_width=True, key=f"reason_{reason}"):
-                final_data = st.session_state.temp_record
-                final_data["報廢原因"] = reason
-                
+            if st.button(reason, use_container_width=True):
+                new_data = {
+                    "輸入時間": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "類別": st.session_state.selected_cat,
+                    "廠商": st.session_state.selected_vendor,
+                    "品項": st.session_state.selected_item,
+                    "重量(g)": st.session_state.temp_weight,
+                    "報廢原因": reason
+                }
                 df = pd.read_csv(DATA_FILE)
-                df = pd.concat([df, pd.DataFrame([final_data])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
                 df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
                 
-                st.success("✅ 登記成功！資料已儲存。")
-                st.session_state.selected_vendor = None
-                st.session_state.selected_item = None
-                st.session_state.show_reasons = False
+                st.session_state.page = "紀錄" 
+                st.session_state.step = 1
                 st.rerun()
 
-with tab2:
-    st.header("最近登記紀錄")
+# --- B. 紀錄頁面 ---
+elif st.session_state.page == "紀錄":
+    st.header("📊 最近登記紀錄")
     if os.path.exists(DATA_FILE):
         history_df = pd.read_csv(DATA_FILE)
         if not history_df.empty:
-            # 只顯示最近三筆，並優化表格顯示
-            st.write("顯示最近 3 筆資料：")
-            st.dataframe(history_df.tail(3).iloc[::-1], use_container_width=True)
+            # 顯示最近三筆，保持要求的欄位順序
+            st.table(history_df[COLUMNS].tail(3).iloc[::-1])
             
-            # 提供完整下載
-            with open(DATA_FILE, "rb") as f:
-                st.download_button(
-                    label="📥 下載完整 CSV 報表",
-                    data=f,
-                    file_name=f"報廢紀錄_{datetime.now().strftime('%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+            st.divider()
+            
+            if st.button("➕ 繼續登記下一筆", type="primary", use_container_width=True):
+                st.session_state.page = "登記"
+                st.session_state.step = 1
+                st.rerun()
+                
+            # 下載按鈕 (使用當前日期命名)
+            csv_data = history_df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button(
+                label="📥 下載完整 CSV 報表",
+                data=csv_data,
+                file_name=f"waste_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+            # --- C. 清除檔案內容功能 ---
+            st.write("---")
+            with st.expander("🛠️ 管理員功能 (清除資料)"):
+                pwd = st.text_input("請輸入管理密碼", type="password")
+                if st.button("確認永久刪除所有紀錄", type="secondary", use_container_width=True):
+                    if pwd == "85129111":
+                        pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+                        st.success("檔案內容已清空！")
+                        st.rerun()
+                    else:
+                        st.error("密碼錯誤，無法刪除。")
         else:
-            st.info("目前尚無登記資料")
+            st.info("目前尚無資料")
+            if st.button("返回登記"):
+                st.session_state.page = "登記"
+                st.rerun()
