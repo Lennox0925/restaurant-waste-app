@@ -131,7 +131,7 @@ if st.session_state.page == "登記":
 
     elif st.session_state.step == 3:
         st.info(f"📍 品項：{st.session_state.selected_item}")
-        weight = st.number_input("3. 輸入重量 (g)", min_value="", step=50)
+        weight = st.number_input("3. 輸入重量 (g)", min_value=0, step=50)
         if st.button("下一步：選擇原因 ➔", use_container_width=True, type="primary"):
             st.session_state.temp_weight = weight
             st.session_state.step = 4; st.rerun()
@@ -196,4 +196,5 @@ elif st.session_state.page == "紀錄":
                         st.success("資料已清空"); st.rerun()
         else:
             st.info("本月目前尚無資料")
+
 
