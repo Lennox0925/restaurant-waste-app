@@ -9,7 +9,7 @@ st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="ce
 
 # 請將下方網址替換為您的 Google 試算表網址
 # 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
-SHEET_URL = "docs.google.com"
+SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
 
 # 建立 Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -85,16 +85,17 @@ if st.session_state.page == "登記":
             st.session_state.step = 4
             st.rerun()
 
-    # 步驟 4: 選擇報廢原因並儲存
+    # 步驟 4: 選擇原因並送出
     elif st.session_state.step == 4:
         st.warning("最後一步：請選擇報廢原因")
         reasons = ["基本損耗", "客人退貨", "品質不佳", "掉落地面"]
         for reason in reasons:
             if st.button(reason, use_container_width=True):
                 now_tw = get_taiwan_time()
-                # 分頁名稱設定為當前年月 (例如: 2026-01)
+                # 分頁名稱，例如 "2026-01"
                 month_sheet_name = now_tw.strftime("%Y-%m")
                 
+                # 1. 準備當前這筆新資料
                 new_data = pd.DataFrame([{
                     "輸入時間": now_tw.strftime("%Y-%m-%d %H:%M"),
                     "類別": st.session_state.selected_cat,
@@ -104,23 +105,28 @@ if st.session_state.page == "登記":
                     "報廢原因": reason
                 }])
                 
-                # 建立連線 (它會自動去 Secrets 讀取設定)
-                conn = st.connection("gsheets", type=GSheetsConnection)
-
-                # --- 在登記儲存時 ---
+                # 2. 處理雲端寫入
                 try:
-                    # 僅指定 worksheet 名稱，不要傳入 spreadsheet=SHEET_URL
+                    # 嘗試讀取當月分頁。ttl=0 確保讀取最新狀態
+                    # 如果分頁不存在，這裡會觸發 WorksheetNotFound
                     existing_data = conn.read(worksheet=month_sheet_name, ttl=0)
-                    updated_df = pd.concat([existing_data, new_data], ignore_index=True)
+                    
+                    # 檢查 existing_data 是否有效
+                    if existing_data is not None and not existing_data.empty:
+                        updated_df = pd.concat([existing_data, new_data], ignore_index=True)
+                    else:
+                        updated_df = new_data
                 except Exception:
-                    # 如果找不到分頁，視為新分頁
+                    # 如果發生任何錯誤（包含 WorksheetNotFound），代表是該月第一筆
                     updated_df = new_data
-
-                # 更新雲端資料
+                
+                # 3. 寫回雲端 (Service Account 模式下，若分頁不存在會自動建立)
                 conn.update(worksheet=month_sheet_name, data=updated_df)
-
-                # --- 在查看紀錄時 ---
-                history_df = conn.read(worksheet=month_sheet_name, ttl=0)
+                
+                st.success(f"✅ 已成功登記至 {month_sheet_name}")
+                st.session_state.page = "紀錄" 
+                st.session_state.step = 1
+                st.rerun()
 
 
 # --- B. 紀錄頁面邏輯 ---
@@ -157,9 +163,6 @@ elif st.session_state.page == "紀錄":
             st.info(f"{month_sheet_name} 目前尚無資料")
     except Exception:
         st.warning(f"尚未建立 {month_sheet_name} 工作表，請先完成第一次登記。")
-
-
-
 
 
 
