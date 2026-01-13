@@ -7,15 +7,11 @@ import os
 # --- 1. 設定頁面與樣式 ---
 st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="centered")
 
-# 請將下方網址替換為您的 Google 試算表網址
-# 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
-SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
-
-# 建立 Google Sheets 連線
+# 建立連線 (它會自動讀取 Secrets 裡的 [connections.gsheets] 設定)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_taiwan_time():
-    # 2026 年 Streamlit Cloud 環境 (UTC+8 修正)
+    # 2026 年修正 (UTC+8)
     return datetime.utcnow() + timedelta(hours=8)
 
 # --- 2. 讀取選單資料 (menu.csv) ---
@@ -32,7 +28,7 @@ df_menu_raw = load_menu()
 if 'page' not in st.session_state: st.session_state.page = "登記"
 if 'step' not in st.session_state: st.session_state.step = 1
 
-# --- 4. 頁面導航按鈕 ---
+# --- 4. 頁面導航 ---
 col_nav1, col_nav2 = st.columns(2)
 if col_nav1.button("📝 進入登記", use_container_width=True): 
     st.session_state.page = "登記"
@@ -48,7 +44,6 @@ st.divider()
 if st.session_state.page == "登記":
     st.header("🍎 雲端報廢登記")
     
-    # 步驟 1: 選擇商品類別
     if st.session_state.step == 1:
         st.subheader("1. 選擇商品類別")
         categories = df_menu_raw["類別"].unique()
@@ -60,7 +55,6 @@ if st.session_state.page == "登記":
                     st.session_state.step = 2
                     st.rerun()
 
-    # 步驟 2: 選擇品項
     elif st.session_state.step == 2:
         st.subheader(f"2. 選擇品項 ({st.session_state.selected_cat})")
         category_items = df_menu_raw[df_menu_raw["類別"] == st.session_state.selected_cat]
@@ -76,26 +70,22 @@ if st.session_state.page == "登記":
             st.session_state.step = 1
             st.rerun()
 
-    # 步驟 3: 輸入重量
     elif st.session_state.step == 3:
-        st.info(f"📍 已選：{st.session_state.selected_cat} > {st.session_state.selected_item}")
+        st.info(f"📍 已選：{st.session_state.selected_item}")
         weight = st.number_input("3. 輸入重量 (克)", min_value=0, step=50, value=0)
         if st.button("確認重量，選擇原因 ➔", type="primary", use_container_width=True):
             st.session_state.temp_weight = weight
             st.session_state.step = 4
             st.rerun()
 
-    # 步驟 4: 選擇原因並送出
     elif st.session_state.step == 4:
         st.warning("最後一步：請選擇報廢原因")
         reasons = ["基本損耗", "客人退貨", "品質不佳", "掉落地面"]
         for reason in reasons:
             if st.button(reason, use_container_width=True):
                 now_tw = get_taiwan_time()
-                # 分頁名稱，例如 "2026-01"
                 month_sheet_name = now_tw.strftime("%Y-%m")
                 
-                # 1. 準備當前這筆新資料
                 new_data = pd.DataFrame([{
                     "輸入時間": now_tw.strftime("%Y-%m-%d %H:%M"),
                     "類別": st.session_state.selected_cat,
@@ -105,29 +95,22 @@ if st.session_state.page == "登記":
                     "報廢原因": reason
                 }])
                 
-                # 2. 處理雲端寫入
+                # --- 修正後的雲端寫入邏輯 ---
                 try:
-                    # 嘗試讀取當月分頁。ttl=0 確保讀取最新狀態
-                    # 如果分頁不存在，這裡會觸發 WorksheetNotFound
+                    # 注意：不傳入 spreadsheet=SHEET_URL
                     existing_data = conn.read(worksheet=month_sheet_name, ttl=0)
-                    
-                    # 檢查 existing_data 是否有效
-                    if existing_data is not None and not existing_data.empty:
-                        updated_df = pd.concat([existing_data, new_data], ignore_index=True)
-                    else:
-                        updated_df = new_data
+                    updated_df = pd.concat([existing_data, new_data], ignore_index=True)
                 except Exception:
-                    # 如果發生任何錯誤（包含 WorksheetNotFound），代表是該月第一筆
+                    # 若 WorksheetNotFound 則視為新表
                     updated_df = new_data
                 
-                # 3. 寫回雲端 (Service Account 模式下，若分頁不存在會自動建立)
+                # 寫回雲端
                 conn.update(worksheet=month_sheet_name, data=updated_df)
                 
                 st.success(f"✅ 已成功登記至 {month_sheet_name}")
                 st.session_state.page = "紀錄" 
                 st.session_state.step = 1
                 st.rerun()
-
 
 # --- B. 紀錄頁面邏輯 ---
 elif st.session_state.page == "紀錄":
@@ -136,35 +119,16 @@ elif st.session_state.page == "紀錄":
     st.header(f"📊 {month_sheet_name} 雲端紀錄")
     
     try:
-        # 指定讀取當月的工作表
-        history_df = conn.read(spreadsheet=SHEET_URL, worksheet=month_sheet_name)
+        # 注意：不傳入 spreadsheet=SHEET_URL
+        history_df = conn.read(worksheet=month_sheet_name, ttl=0)
         if not history_df.empty:
-            # 顯示最新 5 筆紀錄
             st.table(history_df.tail(5).iloc[::-1])
-            
             st.divider()
             if st.button("➕ 繼續登記下一筆", type="primary", use_container_width=True):
                 st.session_state.page = "登記"
                 st.session_state.step = 1
                 st.rerun()
-            
-            # 管理員清除當月資料
-            with st.expander("🛠️ 管理員功能"):
-                pwd = st.text_input("管理密碼", type="password")
-                if st.button(f"清空 {month_sheet_name} 資料表"):
-                    if pwd == "85129111":
-                        empty_df = pd.DataFrame(columns=["輸入時間", "類別", "廠商", "品項", "重量(g)", "報廢原因"])
-                        conn.update(spreadsheet=SHEET_URL, worksheet=month_sheet_name, data=empty_df)
-                        st.success(f"{month_sheet_name} 資料已清空")
-                        st.rerun()
-                    else:
-                        st.error("密碼錯誤")
         else:
             st.info(f"{month_sheet_name} 目前尚無資料")
     except Exception:
-        st.warning(f"尚未建立 {month_sheet_name} 工作表，請先完成第一次登記。")
-
-
-
-
-
+        st.warning(f"尚未建立 {month_sheet_name} 工作表。")
