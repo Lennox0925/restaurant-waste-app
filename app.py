@@ -9,7 +9,7 @@ st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="ce
 
 # 請將下方網址替換為您的 Google 試算表網址
 # 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
-SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit?gid=0#gid=0"
+SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
 
 # 建立 Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -157,6 +157,7 @@ elif st.session_state.page == "紀錄":
             st.info(f"{month_sheet_name} 目前尚無資料")
     except Exception:
         st.warning(f"尚未建立 {month_sheet_name} 工作表，請先完成第一次登記。")
+
 
 
 
