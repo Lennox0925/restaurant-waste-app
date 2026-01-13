@@ -19,11 +19,11 @@ if 'step' not in st.session_state:
 
 # --- 核心邏輯：台灣時區與自動分月 ---
 def get_taiwan_time():
-    # 2026 台灣時區修正
+    # 2026 台灣時區修正 (UTC+8)
     return datetime.utcnow() + timedelta(hours=8)
 
 def get_current_month_file():
-    """根據當前月份產生檔名，確保不同月份資料分開儲存"""
+    """根據當前月份產生本地儲存檔名 (例如: waste_2026-01.csv)"""
     now_tw = get_taiwan_time()
     return f"waste_{now_tw.strftime('%Y-%m')}.csv"
 
@@ -72,9 +72,11 @@ def get_drive_service():
 def upload_to_drive():
     service = get_drive_service()
     if not service: return None
+    
+    # --- 修正處：重新定義備份檔名為 年月日時分秒_waste.csv ---
     now_tw = get_taiwan_time()
-    # 雲端備份檔名包含當月資訊
-    file_name = f"{now_tw.strftime('%Y-%m-%d_%H%M')}_backup_{DATA_FILE}"
+    file_name = f"{now_tw.strftime('%Y-%m-%d_%H%M%S')}_waste.csv"
+    
     try:
         with open(DATA_FILE, 'rb') as f:
             media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype='text/csv')
@@ -178,7 +180,7 @@ elif st.session_state.page == "紀錄":
                     # 執行刪除
                     df_h = df_h.drop(df_h.index[-1])
                     df_h.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
-                    # 設定提示文字並刷新，刷新後 Popover 會自動關閉
+                    # 設定提示文字並刷新
                     st.session_state.delete_msg = f"✅ 已刪除：{last_item['品項']}"
                     st.rerun()
             
@@ -187,7 +189,7 @@ elif st.session_state.page == "紀錄":
             if st.button("🚀 備份本月資料到雲端", use_container_width=True, type="primary"):
                 with st.spinner("雲端傳輸中..."):
                     fid = upload_to_drive()
-                    if fid: st.success(f"✅ 備份成功！檔案 ID: {fid}")
+                    if fid: st.success(f"✅ 備份成功！檔案名稱為：{get_taiwan_time().strftime('%Y-%m-%d_%H%M%S')}_waste.csv")
             
             with st.expander("🛠️ 管理員功能(清空內容)"):
                 if st.text_input("管理密碼", type="password") == "85129111":
@@ -196,5 +198,3 @@ elif st.session_state.page == "紀錄":
                         st.success("資料已清空"); st.rerun()
         else:
             st.info("本月目前尚無資料")
-
-
