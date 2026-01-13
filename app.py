@@ -1,23 +1,24 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-from streamlit_gsheets import GSheetsConnection  # 引入 Google Sheets 連結器
+from streamlit_gsheets import GSheetsConnection
 import os
 
-# --- 設定頁面與樣式 ---
-st.set_page_config(page_title="餐廳雲端報廢系統", layout="centered")
+# --- 1. 設定頁面與樣式 ---
+st.set_page_config(page_title="餐廳報廢系統 (雲端分月版)", layout="centered")
 
-# Google Sheets 連結設定 (請將此網址替換為您的試算表網址)
-# 建議將此網址放在 Streamlit Cloud 的 Secrets 設定中
-SHEET_URL = "docs.google.com"
+# 請將下方網址替換為您的 Google 試算表網址
+# 務必開啟試算表權限為「知道連結的任何人」皆可「編輯」
+SHEET_URL = "docs.google.com/spreadsheets/d/1FOInPuBU3yZpfM3ohS0HHOM2App2p2UwaoEbHMFv6wM/edit"
 
-# 建立連線
+# 建立 Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_taiwan_time():
+    # 2026 年 Streamlit Cloud 環境 (UTC+8 修正)
     return datetime.utcnow() + timedelta(hours=8)
 
-# --- 讀取選單資料 (維持讀取 menu.csv) ---
+# --- 2. 讀取選單資料 (menu.csv) ---
 MENU_FILE = 'menu.csv'
 @st.cache_data
 def load_menu():
@@ -27,14 +28,15 @@ def load_menu():
 
 df_menu_raw = load_menu()
 
-# --- 初始化 Session State ---
+# --- 3. 初始化 Session State ---
 if 'page' not in st.session_state: st.session_state.page = "登記"
 if 'step' not in st.session_state: st.session_state.step = 1
 
-# --- 頁面導航 ---
+# --- 4. 頁面導航按鈕 ---
 col_nav1, col_nav2 = st.columns(2)
 if col_nav1.button("📝 進入登記", use_container_width=True): 
     st.session_state.page = "登記"
+    st.session_state.step = 1
     st.rerun()
 if col_nav2.button("📊 查看紀錄", use_container_width=True): 
     st.session_state.page = "紀錄"
@@ -42,10 +44,11 @@ if col_nav2.button("📊 查看紀錄", use_container_width=True):
 
 st.divider()
 
-# --- A. 登記頁面 ---
+# --- A. 登記頁面邏輯 ---
 if st.session_state.page == "登記":
     st.header("🍎 雲端報廢登記")
     
+    # 步驟 1: 選擇商品類別
     if st.session_state.step == 1:
         st.subheader("1. 選擇商品類別")
         categories = df_menu_raw["類別"].unique()
@@ -57,6 +60,7 @@ if st.session_state.page == "登記":
                     st.session_state.step = 2
                     st.rerun()
 
+    # 步驟 2: 選擇品項
     elif st.session_state.step == 2:
         st.subheader(f"2. 選擇品項 ({st.session_state.selected_cat})")
         category_items = df_menu_raw[df_menu_raw["類別"] == st.session_state.selected_cat]
@@ -72,22 +76,27 @@ if st.session_state.page == "登記":
             st.session_state.step = 1
             st.rerun()
 
+    # 步驟 3: 輸入重量
     elif st.session_state.step == 3:
-        st.info(f"📍 已選：{st.session_state.selected_item}")
+        st.info(f"📍 已選：{st.session_state.selected_cat} > {st.session_state.selected_item}")
         weight = st.number_input("3. 輸入重量 (克)", min_value=0, step=50, value=0)
         if st.button("確認重量，選擇原因 ➔", type="primary", use_container_width=True):
             st.session_state.temp_weight = weight
             st.session_state.step = 4
             st.rerun()
 
+    # 步驟 4: 選擇報廢原因並儲存
     elif st.session_state.step == 4:
         st.warning("最後一步：請選擇報廢原因")
         reasons = ["基本損耗", "客人退貨", "品質不佳", "掉落地面"]
         for reason in reasons:
             if st.button(reason, use_container_width=True):
-                # 準備新資料
+                now_tw = get_taiwan_time()
+                # 分頁名稱設定為當前年月 (例如: 2026-01)
+                month_sheet_name = now_tw.strftime("%Y-%m")
+                
                 new_data = pd.DataFrame([{
-                    "輸入時間": get_taiwan_time().strftime("%Y-%m-%d %H:%M"),
+                    "輸入時間": now_tw.strftime("%Y-%m-%d %H:%M"),
                     "類別": st.session_state.selected_cat,
                     "廠商": st.session_state.selected_vendor,
                     "品項": st.session_state.selected_item,
@@ -95,40 +104,57 @@ if st.session_state.page == "登記":
                     "報廢原因": reason
                 }])
                 
-                # 讀取現有雲端資料並合併
-                existing_data = conn.read(spreadsheet=SHEET_URL, usecols=[0,1,2,3,4,5])
-                updated_df = pd.concat([existing_data, new_data], ignore_index=True)
+                try:
+                    # 讀取雲端同一個試算表中對應月份的分頁
+                    existing_data = conn.read(spreadsheet=SHEET_URL, worksheet=month_sheet_name)
+                    updated_df = pd.concat([existing_data, new_data], ignore_index=True)
+                except Exception:
+                    # 若該月份分頁尚未建立，則直接使用新資料
+                    updated_df = new_data
                 
-                # 寫回 Google Sheets
-                conn.update(spreadsheet=SHEET_URL, data=updated_df)
+                # 寫回雲端 (若分頁不存在會自動建立)
+                conn.update(spreadsheet=SHEET_URL, worksheet=month_sheet_name, data=updated_df)
                 
                 st.session_state.page = "紀錄" 
                 st.session_state.step = 1
                 st.rerun()
 
-# --- B. 紀錄頁面 ---
+# --- B. 紀錄頁面邏輯 ---
 elif st.session_state.page == "紀錄":
-    st.header("📊 雲端即時紀錄")
+    now_tw = get_taiwan_time()
+    month_sheet_name = now_tw.strftime("%Y-%m")
+    st.header(f"📊 {month_sheet_name} 雲端紀錄")
     
-    # 從雲端讀取資料
     try:
-        history_df = conn.read(spreadsheet=SHEET_URL)
+        # 指定讀取當月的工作表
+        history_df = conn.read(spreadsheet=SHEET_URL, worksheet=month_sheet_name)
         if not history_df.empty:
-            st.table(history_df.tail(5).iloc[::-1]) # 顯示最後五筆
+            # 顯示最新 5 筆紀錄
+            st.table(history_df.tail(5).iloc[::-1])
             
+            st.divider()
             if st.button("➕ 繼續登記下一筆", type="primary", use_container_width=True):
                 st.session_state.page = "登記"
                 st.session_state.step = 1
                 st.rerun()
-                
-            # 清除功能 (同樣設密碼)
+            
+            # 管理員清除當月資料
             with st.expander("🛠️ 管理員功能"):
                 pwd = st.text_input("管理密碼", type="password")
-                if st.button("清空雲端資料表"):
+                if st.button(f"清空 {month_sheet_name} 資料表"):
                     if pwd == "85129111":
                         empty_df = pd.DataFrame(columns=["輸入時間", "類別", "廠商", "品項", "重量(g)", "報廢原因"])
-                        conn.update(spreadsheet=SHEET_URL, data=empty_df)
-                        st.success("雲端資料已清空")
+                        conn.update(spreadsheet=SHEET_URL, worksheet=month_sheet_name, data=empty_df)
+                        st.success(f"{month_sheet_name} 資料已清空")
                         st.rerun()
-    except:
-        st.error("無法連線至雲端硬碟，請檢查 SHEET_URL 或權限設定")
+                    else:
+                        st.error("密碼錯誤")
+        else:
+            st.info(f"{month_sheet_name} 目前尚無資料")
+    except Exception:
+        st.warning(f"尚未建立 {month_sheet_name} 工作表，請先完成第一次登記。")
+
+
+
+
+
