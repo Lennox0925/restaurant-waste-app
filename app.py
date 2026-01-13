@@ -12,23 +12,31 @@ from googleapiclient.http import MediaIoBaseUpload
 # --- 1. 初始化與設定 ---
 st.set_page_config(page_title="餐廳報廢系統-2026雲端版", layout="centered")
 
-# 務必先初始化 Session State，避免讀取錯誤
 if 'page' not in st.session_state:
     st.session_state.page = "登記"
 if 'step' not in st.session_state:
     st.session_state.step = 1
 
-DATA_FILE = 'waste_records.csv'
+# --- 核心邏輯：自動分月 ---
+def get_taiwan_time():
+    return datetime.utcnow() + timedelta(hours=8)
+
+# 根據當前月份產生檔名 (例如: waste_2026-01.csv)
+def get_current_month_file():
+    now_tw = get_taiwan_time()
+    return f"waste_{now_tw.strftime('%Y-%m')}.csv"
+
+DATA_FILE = get_current_month_file()
 MENU_FILE = 'menu.csv'
 COLUMNS = ["輸入時間", "類別", "廠商", "品項", "重量(g)", "報廢原因"]
 
-# [務必修改] 填入您個人雲端硬碟的資料夾 ID
-FOLDER_ID = "1R0P9mtMEYA2UIADZuVDhaQshLubUETK3"
+# 確保當月檔案存在
+if not os.path.exists(DATA_FILE):
+    pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
 
-# 權限範圍必須與產生 token.pickle 時一致
+FOLDER_ID = "1R0P9mtMEYA2UIADZuVDhaQshLubUETK3"
 SCOPES = ['www.googleapis.com']
 
-# CSS 樣式優化
 st.markdown("""
     <style>
     div.stButton > button { height: 3.5em; font-size: 1.1rem !important; margin-bottom: 10px; border-radius: 8px; }
@@ -37,81 +45,46 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. 核心功能函數 ---
-def get_taiwan_time():
-    # 2026 台灣時區修正
-    return datetime.utcnow() + timedelta(hours=8)
-
 def get_drive_service():
-    """安全授權邏輯：支援 Secrets 與本地 token.pickle"""
     creds = None
-    
-    # 方式 A: 安全嘗試從 Secrets 讀取 (不直接存取鍵值以防噴錯)
     try:
-        # 使用 .get 避免 'st.secrets has no key "connections"' 報錯
         auth_info = st.secrets.get("google_auth")
         if auth_info and "token_base64" in auth_info:
             token_data = base64.b64decode(auth_info["token_base64"])
             creds = pickle.loads(token_data)
-    except Exception:
-        pass 
+    except Exception: pass 
 
-    # 方式 B: 從本地檔案讀取 (token.pickle)
     if not creds and os.path.exists('token.pickle'):
         try:
             with open('token.pickle', 'rb') as token:
                 creds = pickle.load(token)
-        except Exception as e:
-            st.error(f"讀取 token.pickle 失敗: {e}")
+        except Exception: pass
 
-    # 驗證憑證有效性
-    if creds:
-        if creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception as e:
-                st.error(f"憑證過期且刷新失敗: {e}")
-                return None
+    if creds and creds.expired and creds.refresh_token:
+        try: creds.refresh(Request())
+        except Exception: return None
     
-    if not creds or not creds.valid:
-        st.error("⚠️ 認證失敗：找不到有效的授權憑證。")
-        st.info("請確保環境中有 token.pickle 檔案，或在 Secrets 中設定 google_auth。")
-        return None
-
+    if not creds or not creds.valid: return None
     return build('drive', 'v3', credentials=creds)
 
 def upload_to_drive():
     service = get_drive_service()
     if not service: return None
-    
     now_tw = get_taiwan_time()
-    file_name = f"{now_tw.strftime('%Y-%m-%d_%H%M')}_waste_backup.csv"
-    
+    file_name = f"{now_tw.strftime('%Y-%m-%d_%H%M')}_backup_{DATA_FILE}"
     try:
         with open(DATA_FILE, 'rb') as f:
             media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype='text/csv')
-            file_metadata = {
-                'name': file_name,
-                'parents': [FOLDER_ID]
-            }
-            file = service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
+            file_metadata = {'name': file_name, 'parents': [FOLDER_ID]}
+            file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return file.get('id')
     except Exception as e:
-        st.error(f"上傳至雲端失敗: {e}")
+        st.error(f"上傳失敗: {e}")
         return None
 
-# 初始化本地紀錄
-if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
-
-# 讀取選單
 @st.cache_data
 def load_menu():
-    if os.path.exists(MENU_FILE):
-        return pd.read_csv(MENU_FILE)
+    if os.path.exists(MENU_FILE): return pd.read_csv(MENU_FILE)
     return pd.DataFrame(columns=["類別", "廠商", "品項"])
 
 df_menu_raw = load_menu()
@@ -127,7 +100,7 @@ st.divider()
 
 # --- 4. 登記頁面邏輯 ---
 if st.session_state.page == "登記":
-    st.header("🍎 報廢登記")
+    st.header(f"🍎 報廢登記 ({get_taiwan_time().strftime('%Y-%m')})")
     if st.session_state.step == 1:
         st.subheader("1. 選擇類別")
         cats = df_menu_raw["類別"].unique()
@@ -177,22 +150,34 @@ if st.session_state.page == "登記":
 
 # --- 5. 紀錄頁面邏輯 ---
 elif st.session_state.page == "紀錄":
-    st.header("📊 本地歷史紀錄")
+    st.header(f"📊 {get_taiwan_time().strftime('%Y-%m')} 紀錄")
     if os.path.exists(DATA_FILE):
         df_h = pd.read_csv(DATA_FILE)
         if not df_h.empty:
+            # 顯示表格
             st.table(df_h.tail(5).iloc[::-1])
+            
+            # --- 新增：刪除最後一筆按鈕與提示 ---
+            with st.popover("🗑️ 刪除上一筆資料", use_container_width=True):
+                last_item = df_h.iloc[-1]
+                st.warning(f"確定要刪除最新的這筆資料嗎？\n\n**品項：{last_item['品項']} ({last_item['重量(g)']}g)**")
+                if st.button("確認刪除", type="primary", use_container_width=True):
+                    df_h = df_h.drop(df_h.index[-1])
+                    df_h.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
+                    st.success("資料已刪除")
+                    st.rerun()
+            
             st.divider()
             st.subheader("📂 雲端管理")
-            if st.button("🚀 執行自動雲端備份", use_container_width=True, type="primary"):
+            if st.button("🚀 備份本月資料到雲端", use_container_width=True, type="primary"):
                 with st.spinner("傳輸中..."):
                     fid = upload_to_drive()
                     if fid: st.success(f"✅ 備份成功！檔案 ID: {fid}")
             
             with st.expander("🛠️ 管理員功能"):
-                if st.text_input("密碼", type="password") == "85129111":
-                    if st.button("清空所有本地資料"):
+                if st.text_input("管理密碼", type="password") == "85129111":
+                    if st.button("清空本月本地資料"):
                         pd.DataFrame(columns=COLUMNS).to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
                         st.success("資料已清空"); st.rerun()
         else:
-            st.info("目前尚無資料")
+            st.info("本月目前尚無資料")
