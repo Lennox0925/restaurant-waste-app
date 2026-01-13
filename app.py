@@ -11,7 +11,7 @@ from googleapiclient.http import MediaIoBaseUpload
 DATA_FILE = 'waste_records.csv'
 MENU_FILE = 'menu.csv'
 # 請在此填入您的 Google Drive 資料夾 ID (網址最後一串字元)
-FOLDER_ID = "您的GOOGLE資料夾ID"
+FOLDER_ID = "1R0P9mtMEYA2UIADZuVDhaQshLubUETK3"
 
 st.set_page_config(page_title="餐廳報廢系統 (雲端資料夾備份版)", layout="centered")
 st.markdown("""
@@ -152,3 +152,4 @@ elif st.session_state.page == "紀錄":
                         st.success("已清除"); st.rerun()
         else:
             st.info("目前無資料")
+
