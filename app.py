@@ -164,11 +164,6 @@ except Exception as e:
     st.error(f"❌ 寫入失敗: {str(e)}")
     print(f"Error Detail: {e}")
 
-        
-    except Exception as e:
-        st.error(f"❌ 寫入失敗: {str(e)}")
-        # 印出詳細錯誤到後台 Logs
-        print(f"Error Detail: {e}")
     
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -506,6 +501,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
