@@ -89,66 +89,39 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
         drive = get_gdrive_instance()
         
-        # 1. 搜尋特定資料夾下的特定檔案
-        # 修正：PyDrive 搜尋語法 title=檔名, parents=資料夾ID
+        # 1. 搜尋檔案 (限定在該資料夾內)
         query = f"title = '{FILE_NAME}' and '{FOLDER_ID}' in parents and trashed = false"
         file_list = drive.ListFile({'q': query}).GetList()
 
-        gfile = None
-        df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-
         if file_list:
-            # 如果找到檔案，抓取第一個符合的
             gfile = file_list[0]
-            # 修正：強制從雲端抓取最新二進位內容
+            # 讀取舊資料
             content_bytes = gfile.GetContentBinary()
-            if content_bytes:
-                df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
-            st.info(f"已從雲端讀取現有紀錄 (目前 {len(df)} 筆)")
+            df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
         else:
-            # 檔案不存在，建立新檔案物件並指定父資料夾
-            st.warning("雲端資料夾尚無檔案，正在建立新紀錄檔...")
+            # 檔案不存在，明確指定父資料夾建立新檔案
+            df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
             gfile = drive.CreateFile({
                 'title': FILE_NAME,
-                'parents': [{'id': FOLDER_ID}],
-                'mimeType': 'text/csv'
+                'parents': [{'id': FOLDER_ID}]  # 強制指定資料夾 ID
             })
 
-        # 2. 準備新資料
+        # 2. 準備與合併新資料
         now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
-        new_entry = pd.DataFrame([{
-            "時間": now, "訓練員": trainer, "受測人": staff, "職位": staff_type, "崗位": pos
-        }])
-
-        # 3. 合併資料 (確保強制追加)
+        new_entry = pd.DataFrame([{"時間": now, "訓練員": trainer, "受測人": staff, "職位": staff_type, "崗位": pos}])
         df = pd.concat([df, new_entry], ignore_index=True)
 
-        # 4. 寫入雲端 (完全略過 Streamlit 本地硬碟)
+        # 3. 寫入並上傳 (加上強制參數)
         csv_output = df.to_csv(index=False, encoding='utf-8-sig')
         gfile.SetContentString(csv_output)
         
-        # 修正：強制更新現有檔案或上傳新檔
-        gfile.Upload() 
+        # 修正：加上 param 確保權限與路徑正確
+        gfile.Upload(param={'supportsAllDrives': True}) 
         
-        # 5. 二次驗證：確認雲端 ID 存在
-        gfile.FetchMetadata()
+        st.success(f"✅ 已同步至雲端資料夾！(ID: {gfile['id']})")
         
-        st.success(f"✅ 成功寫入個人雲端！檔案 ID: {gfile['id']}")
-        st.write(f"📊 雲端最新總筆數: {len(df)}")
-
-        # 6. 提供下載按鈕作為「當前寫入內容」的驗證
-        st.download_button(
-            label="📥 下載本次寫入內容驗證",
-            data=csv_output,
-            file_name=f"verify_upload_{datetime.now().strftime('%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
     except Exception as e:
-        st.error(f"❌ 雲端強制寫入失敗: {str(e)}")
-        # 額外輸出詳細 Log 到終端機以便排除權限問題
-        import traceback
-        print(traceback.format_exc())
+        st.error(f"❌ 雲端寫入失敗: {e}")
     
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -520,6 +493,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
