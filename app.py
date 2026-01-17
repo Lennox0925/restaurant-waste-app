@@ -74,6 +74,24 @@ def upload_to_gdrive(file_path, file_name):
 TZ_TAIWAN = timezone(timedelta(hours=8))
 FILE_NAME = "history_log.csv"
 
+HISTORY_FILE = "history_log.csv"
+# 檢查檔案是否存在於伺服器中
+if os.path.exists(HISTORY_FILE):
+    with open(HISTORY_FILE, "rb") as f:
+        # 讀取檔案內容
+        file_data = f.read()
+        
+    # 建立下載按鈕
+    st.download_button(
+        label="📥 點我下載歷史紀錄 (CSV)",
+        data=file_data,
+        file_name="history_log_backup.csv",
+        mime="text/csv"
+    )
+else:
+    st.warning("目前還沒有找到歷史紀錄檔案。")
+
+
 def get_gdrive_instance():
     # 從 Streamlit Secrets 讀取設定
     scope = ['https://www.googleapis.com']
@@ -461,6 +479,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
