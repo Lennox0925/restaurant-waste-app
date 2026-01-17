@@ -280,25 +280,33 @@ def get_cloud_history_df():
 if st.session_state.step == 'view_history':
     st.markdown("## 📜 歷史考核摘要 (同步自雲端)")
     
-    # 從雲端獲取資料
+    # 1. 嘗試從雲端獲取資料
     h_df = get_cloud_history_df()
     
-    if h_df is not None and not h_df.empty:
-        # 提供下載按鈕：直接使用記憶體中的 dataframe 轉換為 CSV 下載
+    # --- 偵錯區：如果沒出現按鈕，請看網頁上的提示 ---
+    if h_df is None:
+        st.error("❌ 無法從 Google Drive 取得資料。")
+        st.info(f"請檢查：\n1. 資料夾 ID `{FOLDER_ID}` 是否正確\n2. 檔名 `{FILE_NAME}` 是否正確\n3. 服務帳號是否有該資料夾的『編輯者』權限")
+    elif h_df.empty:
+        st.warning("⚠️ 雲端檔案存在，但裡面沒有任何數據。")
+    else:
+        # --- 2. 確定有資料後，才顯示下載按鈕與表格 ---
         csv_data = h_df.to_csv(index=False, encoding='utf-8-sig')
+        
+        # 這裡會強制顯示按鈕
         st.download_button(
             label="📥 下載完整雲端紀錄 (CSV)",
             data=csv_data,
-            file_name=f"history_backup_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
+            file_name=f"history_log_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            key="download_history_btn" # 加入 key 確保按鈕唯一性
         )
         
-        # 顯示表格 (取最後 15 筆並反轉順序)
+        # 顯示预览
         st.table(h_df.tail(15).iloc[::-1])
-    else:
-        st.info("☁️ 雲端目前尚無紀錄。")
 
-    if st.button("⬅️ 返回主選單"):
+    # --- 3. 返回選單 ---
+    if st.button("⬅️ 返回主選單", key="back_to_menu"):
         st.session_state.step = 'select_trainer'
         st.rerun()
 
@@ -512,6 +520,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
