@@ -87,14 +87,7 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
         new_entry.to_csv(HISTORY_FILE, index=False, encoding='utf-8-sig')
     else:
         new_entry.to_csv(HISTORY_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
-    if os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "rb") as f:
-        st.download_button(
-            label="下載歷史紀錄 (CSV)",
-            data=f,
-            file_name="history_log.csv",
-            mime="text/csv"
-        )
+    
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
 def load_app_data():
@@ -431,6 +424,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
