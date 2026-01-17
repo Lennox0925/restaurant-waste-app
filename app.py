@@ -74,10 +74,9 @@ def upload_to_gdrive(file_path, file_name):
 TZ_TAIWAN = timezone(timedelta(hours=8))
 FILE_NAME = "history_log.csv"
 
-HISTORY_FILE = "history_log.csv"
 # 檢查檔案是否存在於伺服器中
-if os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "rb") as f:
+if os.path.exists(FILE_NAME):
+    with open(FILE_NAME "rb") as f:
         # 讀取檔案內容
         file_data = f.read()
         
@@ -479,6 +478,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
