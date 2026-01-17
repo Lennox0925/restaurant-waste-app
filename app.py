@@ -87,64 +87,69 @@ def get_gdrive_instance():
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
-    # 1. 搜尋檔案 (確保抓取最新狀態)
-    query = f"name = '{FILE_NAME}' and trashed = false and '{FOLDER_ID}' in parents"
-    file_list = drive.ListFile({'q': query}).GetList()
+        # 取得雲端實例 (請確保 get_gdrive_instance 已正確配置)
+        drive = get_gdrive_instance()
+        
+        # --- 核心修正：搜尋雲端資料夾內的檔案 ---
+        # 使用 'title' (PyDrive) 而非 'name' (Drive API v3) 並限制在 FOLDER_ID 中搜尋
+        query = f"title = '{FILE_NAME}' and '{FOLDER_ID}' in parents and trashed = false"
+        file_list = drive.ListFile({'q': query}).GetList()
 
-    if file_list:
-        # 檔案存在，讀取舊資料
-        gfile = file_list[0]
-        content_bytes = gfile.GetContentBinary()
-        try:
-            df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
-        except Exception:
-            # 若檔案內容損壞或格式不對，建立新的
+        if file_list:
+            # 檔案存在，從雲端捉取最新內容
+            gfile = file_list[0]
+            # 修正：直接讀取位元組流，避免本地暫存 log 檔的干擾
+            content_bytes = gfile.GetContentBinary()
+            try:
+                # 使用 BytesIO 讓 pandas 直接讀取雲端回傳的位元組資料
+                df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
+            except Exception:
+                # 若內容毀損則初始化
+                df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+        else:
+            # 檔案不存在，初始化並建立新檔案物件
+            st.warning(f"雲端資料夾中找不到 '{FILE_NAME}'，將於該目錄下建立新檔。")
             df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-    else:
-        # 檔案不存在，建立新 DataFrame
-        st.warning("找不到現有檔案，將建立新檔。")
-        df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-        gfile = drive.CreateFile({
-            'title': FILE_NAME,
-            'parents': [{'id': FOLDER_ID}]
-        })
+            gfile = drive.CreateFile({
+                'title': FILE_NAME,
+                'parents': [{'id': FOLDER_ID}] # 強制建立在您的個人資料夾內
+            })
 
-    # 2. 準備新資料
-    now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
-    new_entry = pd.DataFrame([{
-        "時間": now,
-        "訓練員": trainer,
-        "受測人": staff,
-        "職位": staff_type,
-        "崗位": pos
-    }])
+        # --- 2. 準備新資料 ---
+        now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
+        new_entry = pd.DataFrame([{
+            "時間": now,
+            "訓練員": trainer,
+            "受測人": staff,
+            "職位": staff_type,
+            "崗位": pos
+        }])
 
-    # 3. 合併資料
-    df = pd.concat([df, new_entry], ignore_index=True)
+        # --- 3. 合併資料 ---
+        df = pd.concat([df, new_entry], ignore_index=True)
 
-    # 4. 寫入雲端 (utf-8-sig 編碼，Excel 可開)
-    csv_output = df.to_csv(index=False, encoding='utf-8-sig')
-    gfile.SetContentString(csv_output)
-    gfile.Upload()  # 執行上傳
+        # --- 4. 寫入雲端 (完全略過本地儲存) ---
+        csv_output = df.to_csv(index=False, encoding='utf-8-sig')
+        gfile.SetContentString(csv_output) # 將資料存入 gfile 物件記憶體
+        gfile.Upload()  # 執行上傳並覆蓋雲端檔案
 
-    # 5. 強制刷新雲端狀態確認
-    gfile.FetchMetadata()
-    print("✅ File uploaded, ID:", gfile['id'])
+        # --- 5. 強制刷新雲端中繼資料確認 ---
+        gfile.FetchMetadata()
+        
+        # 6. 成功提示與雲端狀態顯示
+        st.success(f"✅ 資料已成功寫入 Google Drive 個人資料夾！(雲端總筆數: {len(df)})")
 
-    # 6. 成功提示
-    st.success(f"✅ 資料已成功同步至 Google Drive！(目前總筆數: {len(df)})")
+        # 7. 提供下載按鈕 (供本地端即時驗證)
+        st.download_button(
+            label="📥 立即下載雲端備份確認",
+            data=csv_output,
+            file_name=f"cloud_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
 
-    # 7. 提供即時下載按鈕
-    st.download_button(
-        label="📥 下載最新歷史紀錄備份 (CSV)",
-        data=csv_output,
-        file_name=f"history_log_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
-
-except Exception as e:
-    st.error(f"❌ 寫入失敗: {str(e)}")
-    print(f"Error Detail: {e}")
+    except Exception as e:
+        st.error(f"❌ 雲端同步失敗: {str(e)}")
+        print(f"Error Detail: {e}")
 
     
 # --- 3. 資料讀取與架構初始化 ---
@@ -483,6 +488,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
