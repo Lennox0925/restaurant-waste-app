@@ -61,21 +61,51 @@ def upload_to_gdrive(file_path, file_name):
 
 
 # --- 2. 歷史紀錄總表維護邏輯 ---
-HISTORY_FILE = "history_log.csv"
+# 設定試算表網址 (從瀏覽器網址列複製)
+SHEET_URL = "https://docs.google.com"
+
+def get_history_from_drive():
+    """從雲端讀取歷史紀錄"""
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # 讀取現有的所有資料
+        df = conn.read(spreadsheet=SHEET_URL, ttl=0) # ttl=0 表示不快取，每次都抓最新的
+        return df
+    except Exception as e:
+        st.error(f"讀取失敗: {e}")
+        return pd.DataFrame()
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    new_entry = pd.DataFrame([{
-        "時間": now, 
-        "訓練員": trainer, 
-        "受測人": staff, 
-        "職位": staff_type, 
-        "崗位": pos
-    }])
-    if not os.path.exists(HISTORY_FILE):
-        new_entry.to_csv(HISTORY_FILE, index=False, encoding='utf-8-sig')
-    else:
-        new_entry.to_csv(HISTORY_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
+    """寫入新資料到雲端"""
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        
+        # 1. 先抓取目前雲端上的資料
+        existing_df = conn.read(spreadsheet=SHEET_URL, ttl=0)
+        existing_df = existing_df.dropna(how="all") # 清除空行
+
+        # 2. 處理 2026 台灣時區時間
+        tz_taiwan = timezone(timedelta(hours=8))
+        now = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
+        
+        # 3. 建立新條目
+        new_entry = pd.DataFrame([{
+            "時間": now, 
+            "訓練員": trainer, 
+            "受測人": staff, 
+            "職位": staff_type, 
+            "崗位": pos
+        }])
+        
+        # 4. 合併舊資料與新資料
+        updated_df = pd.concat([existing_df, new_entry], ignore_index=True)
+        
+        # 5. 整份覆蓋回雲端 (這是 gspread 最穩定的更新方式)
+        conn.update(spreadsheet=SHEET_URL, data=updated_df)
+        st.success("✅ 資料已同步至雲端硬碟")
+        
+    except Exception as e:
+        st.error(f"雲端儲存失敗: {e}")
 
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -367,3 +397,4 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
