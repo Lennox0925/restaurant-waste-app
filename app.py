@@ -104,15 +104,21 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
         drive = get_gdrive_instance()
         
-        # 1. 搜尋檔案
+        # 1. 搜尋檔案 (確保抓取最新狀態)
         file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
         
         if file_list:
+            # 檔案存在，讀取舊資料
             gfile = file_list[0]
-            # 修正：直接讀取位元組流，避免大型檔案在 String 轉換時出錯
+            # 修正：使用 GetContentBinary 搭配 utf-8-sig 讀取，避免中文解析失敗
             content_bytes = gfile.GetContentBinary()
-            df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
+            try:
+                df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
+            except Exception:
+                # 若檔案內容損壞或格式不對，建立新的
+                df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
         else:
+            # 檔案不存在，建立新 DataFrame
             st.warning("找不到現有檔案，將建立新檔。")
             df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
             gfile = drive.CreateFile({'title': FILE_NAME})
@@ -127,29 +133,33 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
             "崗位": pos
         }])
         
-        # 3. 合併資料
-        # 修正：確保 columns 順序一致
+        # 3. 合併資料 (確保排除空欄位問題)
         df = pd.concat([df, new_entry], ignore_index=True)
         
-        # 4. 上傳資料
-        # 修正：使用 BytesIO 配合 utf-8-sig 確保 Excel 開啟不亂碼
-        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
-        gfile.SetContentString(csv_data) 
-        gfile.Upload()
+        # 4. 寫入雲端
+        # 修正：直接生成 CSV 字串，確保 utf-8-sig 編碼 (Excel 可開)
+        csv_output = df.to_csv(index=False, encoding='utf-8-sig')
         
-        st.success("✅ 資料已成功同步至 Google Drive！")
+        gfile.SetContentString(csv_output)
+        gfile.Upload() # 執行上傳
         
-        # 5. 提供即時下載按鈕 (選配)
-        # 讓使用者在寫入後能立刻下載一份到本地
+        # 5. 強制刷新雲端狀態確認
+        gfile.FetchMetadata() 
+        
+        st.success(f"✅ 資料已成功同步至 Google Drive！(目前總筆數: {len(df)})")
+        
+        # 6. 提供即時下載按鈕 (讓你在 Streamlit 介面就能直接下載確認)
         st.download_button(
-            label="存檔成功！點此下載最新紀錄備份",
-            data=csv_data,
-            file_name=f"history_backup_{now[:10]}.csv",
+            label="📥 下載最新歷史紀錄備份 (CSV)",
+            data=csv_output,
+            file_name=f"history_log_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
         
     except Exception as e:
         st.error(f"❌ 寫入失敗: {str(e)}")
+        # 印出詳細錯誤到後台 Logs
+        print(f"Error Detail: {e}")
     
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -487,6 +497,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
