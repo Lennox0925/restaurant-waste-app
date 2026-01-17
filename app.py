@@ -87,70 +87,68 @@ def get_gdrive_instance():
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
-        # 取得雲端實例 (請確保 get_gdrive_instance 已正確配置)
         drive = get_gdrive_instance()
         
-        # --- 核心修正：搜尋雲端資料夾內的檔案 ---
-        # 使用 'title' (PyDrive) 而非 'name' (Drive API v3) 並限制在 FOLDER_ID 中搜尋
+        # 1. 搜尋特定資料夾下的特定檔案
+        # 修正：PyDrive 搜尋語法 title=檔名, parents=資料夾ID
         query = f"title = '{FILE_NAME}' and '{FOLDER_ID}' in parents and trashed = false"
         file_list = drive.ListFile({'q': query}).GetList()
 
+        gfile = None
+        df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+
         if file_list:
-            # 檔案存在，從雲端捉取最新內容
+            # 如果找到檔案，抓取第一個符合的
             gfile = file_list[0]
-            # 修正：直接讀取位元組流，避免本地暫存 log 檔的干擾
+            # 修正：強制從雲端抓取最新二進位內容
             content_bytes = gfile.GetContentBinary()
-            try:
-                # 使用 BytesIO 讓 pandas 直接讀取雲端回傳的位元組資料
+            if content_bytes:
                 df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
-            except Exception:
-                # 若內容毀損則初始化
-                df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+            st.info(f"已從雲端讀取現有紀錄 (目前 {len(df)} 筆)")
         else:
-            # 檔案不存在，初始化並建立新檔案物件
-            st.warning(f"雲端資料夾中找不到 '{FILE_NAME}'，將於該目錄下建立新檔。")
-            df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+            # 檔案不存在，建立新檔案物件並指定父資料夾
+            st.warning("雲端資料夾尚無檔案，正在建立新紀錄檔...")
             gfile = drive.CreateFile({
                 'title': FILE_NAME,
-                'parents': [{'id': FOLDER_ID}] # 強制建立在您的個人資料夾內
+                'parents': [{'id': FOLDER_ID}],
+                'mimeType': 'text/csv'
             })
 
-        # --- 2. 準備新資料 ---
+        # 2. 準備新資料
         now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
         new_entry = pd.DataFrame([{
-            "時間": now,
-            "訓練員": trainer,
-            "受測人": staff,
-            "職位": staff_type,
-            "崗位": pos
+            "時間": now, "訓練員": trainer, "受測人": staff, "職位": staff_type, "崗位": pos
         }])
 
-        # --- 3. 合併資料 ---
+        # 3. 合併資料 (確保強制追加)
         df = pd.concat([df, new_entry], ignore_index=True)
 
-        # --- 4. 寫入雲端 (完全略過本地儲存) ---
+        # 4. 寫入雲端 (完全略過 Streamlit 本地硬碟)
         csv_output = df.to_csv(index=False, encoding='utf-8-sig')
-        gfile.SetContentString(csv_output) # 將資料存入 gfile 物件記憶體
-        gfile.Upload()  # 執行上傳並覆蓋雲端檔案
-
-        # --- 5. 強制刷新雲端中繼資料確認 ---
+        gfile.SetContentString(csv_output)
+        
+        # 修正：強制更新現有檔案或上傳新檔
+        gfile.Upload() 
+        
+        # 5. 二次驗證：確認雲端 ID 存在
         gfile.FetchMetadata()
         
-        # 6. 成功提示與雲端狀態顯示
-        st.success(f"✅ 資料已成功寫入 Google Drive 個人資料夾！(雲端總筆數: {len(df)})")
+        st.success(f"✅ 成功寫入個人雲端！檔案 ID: {gfile['id']}")
+        st.write(f"📊 雲端最新總筆數: {len(df)}")
 
-        # 7. 提供下載按鈕 (供本地端即時驗證)
+        # 6. 提供下載按鈕作為「當前寫入內容」的驗證
         st.download_button(
-            label="📥 立即下載雲端備份確認",
+            label="📥 下載本次寫入內容驗證",
             data=csv_output,
-            file_name=f"cloud_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"verify_upload_{datetime.now().strftime('%H%M%S')}.csv",
             mime="text/csv"
         )
 
     except Exception as e:
-        st.error(f"❌ 雲端同步失敗: {str(e)}")
-        print(f"Error Detail: {e}")
-
+        st.error(f"❌ 雲端強制寫入失敗: {str(e)}")
+        # 額外輸出詳細 Log 到終端機以便排除權限問題
+        import traceback
+        print(traceback.format_exc())
     
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -488,6 +486,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
