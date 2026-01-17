@@ -70,47 +70,60 @@ def upload_to_gdrive(file_path, file_name):
 
 
 # --- 2. 歷史紀錄總表維護邏輯 ---
-# Google Drive 設定
+# 設定時區
+TZ_TAIWAN = timezone(timedelta(hours=8))
 FILE_NAME = "history_log.csv"
 
-def get_gdrive_client():
+def get_gdrive_instance():
+    # 從 Streamlit Secrets 讀取設定
     scope = ['https://www.googleapis.com']
+    # 確保 secrets 中有名為 "gdrive" 的區塊
     creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gdrive"], scope)
     gauth = GoogleAuth()
     gauth.credentials = creds
     return GoogleDrive(gauth)
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
-    drive = get_gdrive_client()
-    
-    # 尋找雲端硬碟中的檔案
-    file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
-    gfile = file_list[0] if file_list else drive.CreateFile({'title': FILE_NAME})
+    try:
+        drive = get_gdrive_instance()
+        
+        # 1. 搜尋檔案
+        file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
+        
+        if file_list:
+            # 檔案存在，下載內容
+            gfile = file_list[0]
+            content = gfile.GetContentString(encoding='utf-8-sig')
+            df = pd.read_csv(io.StringIO(content))
+        else:
+            # 檔案不存在，建立新 DataFrame
+            st.warning("找不到現有檔案，將建立新檔。")
+            df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+            gfile = drive.CreateFile({'title': FILE_NAME})
 
-    # 讀取現有資料或建立新的 DataFrame
-    if file_list:
-        content = gfile.GetContentString(encoding='utf-8-sig')
-        df = pd.read_csv(io.StringIO(content))
-    else:
-        df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-
-    # 新增資料
-    tz_taiwan = timezone(timedelta(hours=8))
-    now = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
-    new_entry = pd.DataFrame([{
-        "時間": now, 
-        "訓練員": trainer, 
-        "受測人": staff, 
-        "職位": staff_type, 
-        "崗位": pos
-    }])
-    df = pd.concat([df, new_entry], ignore_index=True)
-
-    # 寫回雲端硬碟
-    output = io.StringIO()
-    df.to_csv(output, index=False, encoding='utf-8-sig')
-    gfile.SetContentString(output.getvalue())
-    gfile.Upload()
+        # 2. 準備新資料
+        now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
+        new_entry = pd.DataFrame([{
+            "時間": now, 
+            "訓練員": trainer, 
+            "受測人": staff, 
+            "職位": staff_type, 
+            "崗位": pos
+        }])
+        
+        # 3. 合併並上傳
+        df = pd.concat([df, new_entry], ignore_index=True)
+        
+        # 強制轉為 CSV 字串並上傳
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
+        gfile.SetContentString(csv_buffer.getvalue())
+        gfile.Upload() # 這裡才是真正寫入雲端
+        
+        st.success("✅ 資料已成功同步至 Google Drive！")
+        
+    except Exception as e:
+        st.error(f"❌ 寫入失敗: {str(e)}")
     
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -448,6 +461,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
