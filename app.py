@@ -102,51 +102,60 @@ def get_gdrive_instance():
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
-        drive = get_gdrive_instance()
-        
-        # 1. 搜尋檔案 (確保抓取最新狀態)
-        file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
-        
-        if file_list:
-            # 檔案存在，讀取舊資料
-            gfile = file_list[0]
-            # 修正：使用 GetContentBinary 搭配 utf-8-sig 讀取，避免中文解析失敗
-            content_bytes = gfile.GetContentBinary()
-            try:
-                df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
-            except Exception:
-                # 若檔案內容損壞或格式不對，建立新的
-                df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-        else:
-            # 檔案不存在，建立新 DataFrame
-            st.warning("找不到現有檔案，將建立新檔。")
-            df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-            gfile = drive.CreateFile({'title': FILE_NAME})
+    # 1. 搜尋檔案 (確保抓取最新狀態)
+    file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
 
-        # 2. 準備新資料
-        now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
-        new_entry = pd.DataFrame([{
-            "時間": now, 
-            "訓練員": trainer, 
-            "受測人": staff, 
-            "職位": staff_type, 
-            "崗位": pos
-        }])
-        
-        # 3. 合併資料 (確保排除空欄位問題)
-        df = pd.concat([df, new_entry], ignore_index=True)
-        
-        # 4. 寫入雲端
-        # 修正：直接生成 CSV 字串，確保 utf-8-sig 編碼 (Excel 可開)
-        csv_output = df.to_csv(index=False, encoding='utf-8-sig')
-        
-        gfile.SetContentString(csv_output)
-        gfile.Upload() # 執行上傳
-        
-        # 5. 強制刷新雲端狀態確認
-        gfile.FetchMetadata() 
-        
-        st.success(f"✅ 資料已成功同步至 Google Drive！(目前總筆數: {len(df)})")
+    if file_list:
+        # 檔案存在，讀取舊資料
+        gfile = file_list[0]
+        content_bytes = gfile.GetContentBinary()
+        try:
+            df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
+        except Exception:
+            # 若檔案內容損壞或格式不對，建立新的
+            df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+    else:
+        # 檔案不存在，建立新 DataFrame
+        st.warning("找不到現有檔案，將建立新檔。")
+        df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
+        gfile = drive.CreateFile({'title': FILE_NAME})
+
+    # 2. 準備新資料
+    now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
+    new_entry = pd.DataFrame([{
+        "時間": now,
+        "訓練員": trainer,
+        "受測人": staff,
+        "職位": staff_type,
+        "崗位": pos
+    }])
+
+    # 3. 合併資料 (排除空欄位問題)
+    df = pd.concat([df, new_entry], ignore_index=True)
+
+    # 4. 寫入雲端 (確保 utf-8-sig 編碼，Excel 可開)
+    csv_output = df.to_csv(index=False, encoding='utf-8-sig')
+    gfile.SetContentString(csv_output)
+    gfile.Upload()  # 執行上傳
+
+    # 5. 強制刷新雲端狀態確認
+    gfile.FetchMetadata()
+
+    # 6. 成功提示
+    st.success(f"✅ 資料已成功同步至 Google Drive！(目前總筆數: {len(df)})")
+
+    # 7. 提供即時下載按鈕
+    st.download_button(
+        label="📥 下載最新歷史紀錄備份 (CSV)",
+        data=csv_output,
+        file_name=f"history_log_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
+
+except Exception as e:
+    st.error(f"❌ 寫入失敗: {str(e)}")
+    print(f"Error Detail: {e}")
+
         
         # 6. 提供即時下載按鈕 (讓你在 Streamlit 介面就能直接下載確認)
         st.download_button(
@@ -497,6 +506,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
