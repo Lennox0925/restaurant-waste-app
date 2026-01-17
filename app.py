@@ -108,12 +108,11 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
         file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
         
         if file_list:
-            # 檔案存在，下載內容
             gfile = file_list[0]
-            content = gfile.GetContentString(encoding='utf-8-sig')
-            df = pd.read_csv(io.StringIO(content))
+            # 修正：直接讀取位元組流，避免大型檔案在 String 轉換時出錯
+            content_bytes = gfile.GetContentBinary()
+            df = pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
         else:
-            # 檔案不存在，建立新 DataFrame
             st.warning("找不到現有檔案，將建立新檔。")
             df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
             gfile = drive.CreateFile({'title': FILE_NAME})
@@ -128,16 +127,26 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
             "崗位": pos
         }])
         
-        # 3. 合併並上傳
+        # 3. 合併資料
+        # 修正：確保 columns 順序一致
         df = pd.concat([df, new_entry], ignore_index=True)
         
-        # 強制轉為 CSV 字串並上傳
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-        gfile.SetContentString(csv_buffer.getvalue())
-        gfile.Upload() # 這裡才是真正寫入雲端
+        # 4. 上傳資料
+        # 修正：使用 BytesIO 配合 utf-8-sig 確保 Excel 開啟不亂碼
+        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+        gfile.SetContentString(csv_data) 
+        gfile.Upload()
         
         st.success("✅ 資料已成功同步至 Google Drive！")
+        
+        # 5. 提供即時下載按鈕 (選配)
+        # 讓使用者在寫入後能立刻下載一份到本地
+        st.download_button(
+            label="存檔成功！點此下載最新紀錄備份",
+            data=csv_data,
+            file_name=f"history_backup_{now[:10]}.csv",
+            mime="text/csv"
+        )
         
     except Exception as e:
         st.error(f"❌ 寫入失敗: {str(e)}")
@@ -478,6 +487,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
