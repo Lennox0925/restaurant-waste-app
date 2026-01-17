@@ -10,6 +10,9 @@ import base64
 import requests
 import pytz
 from datetime import datetime, timezone, timedelta
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 
 # 設定台灣時區
 tw_timezone = pytz.timezone('Asia/Taipei')
@@ -445,6 +448,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
