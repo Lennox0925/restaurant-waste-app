@@ -259,22 +259,48 @@ if 'step' not in st.session_state: st.session_state.step = 'select_trainer'
 if 'complete' not in st.session_state: st.session_state.complete = False
 
 # --- 7. 步驟流程渲染 ---
-if os.path.exists(HISTORY_FILE):
-    with open(HISTORY_FILE, "rb") as f:
+def get_cloud_history_df():
+    try:
+        drive = get_gdrive_instance()
+        # 強制只在指定資料夾搜尋最新檔案
+        query = f"title = '{FILE_NAME}' and '{FOLDER_ID}' in parents and trashed = false"
+        file_list = drive.ListFile({'q': query}).GetList()
+
+        if file_list:
+            gfile = file_list[0]
+            # 直接讀取雲端二進位內容，不經由本地硬碟
+            content_bytes = gfile.GetContentBinary()
+            return pd.read_csv(io.BytesIO(content_bytes), encoding='utf-8-sig')
+        return None
+    except Exception as e:
+        st.error(f"獲取雲端紀錄失敗: {e}")
+        return None
+
+# --- 2. 顯示邏輯 ---
+if st.session_state.step == 'view_history':
+    st.markdown("## 📜 歷史考核摘要 (同步自雲端)")
+    
+    # 從雲端獲取資料
+    h_df = get_cloud_history_df()
+    
+    if h_df is not None and not h_df.empty:
+        # 提供下載按鈕：直接使用記憶體中的 dataframe 轉換為 CSV 下載
+        csv_data = h_df.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
-            label="下載歷史紀錄 (CSV)",
-            data=f,
-            file_name="history_log.csv",
+            label="📥 下載完整雲端紀錄 (CSV)",
+            data=csv_data,
+            file_name=f"history_backup_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
-if st.session_state.step == 'view_history':
-    st.markdown("## 📜 歷史考核摘要")
-    
-    if os.path.exists(HISTORY_FILE):
-        h_df = pd.read_csv(HISTORY_FILE, encoding='utf-8-sig')
+        
+        # 顯示表格 (取最後 15 筆並反轉順序)
         st.table(h_df.tail(15).iloc[::-1])
-    else: st.info("目前尚無紀錄。")
-    if st.button("⬅️ 返回主選單"): st.session_state.step = 'select_trainer'; st.rerun()
+    else:
+        st.info("☁️ 雲端目前尚無紀錄。")
+
+    if st.button("⬅️ 返回主選單"):
+        st.session_state.step = 'select_trainer'
+        st.rerun()
 
 elif st.session_state.step == 'view_staff_type':
     st.markdown("## 👥 選擇查看職位")
@@ -486,6 +512,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
