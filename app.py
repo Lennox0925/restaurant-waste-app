@@ -8,6 +8,12 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 import base64
 import requests
+import pytz
+from datetime import datetime, timezone, timedelta
+
+# 設定台灣時區
+tw_timezone = pytz.timezone('Asia/Taipei')
+now_taiwan = datetime.now(tw_timezone)
 
 def sync_to_cloud(file_path, file_name):
     # 修改為您剛剛得到的 GAS 網址
@@ -61,51 +67,26 @@ def upload_to_gdrive(file_path, file_name):
 
 
 # --- 2. 歷史紀錄總表維護邏輯 ---
-# 設定試算表網址 (從瀏覽器網址列複製)
-SHEET_URL = "https://docs.google.com"
-
-def get_history_from_drive():
-    """從雲端讀取歷史紀錄"""
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        # 讀取現有的所有資料
-        df = conn.read(spreadsheet=SHEET_URL, ttl=0) # ttl=0 表示不快取，每次都抓最新的
-        return df
-    except Exception as e:
-        st.error(f"讀取失敗: {e}")
-        return pd.DataFrame()
+HISTORY_FILE = "history_log.csv"
 
 def save_summary_to_history(trainer, staff, staff_type, pos):
-    """寫入新資料到雲端"""
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        
-        # 1. 先抓取目前雲端上的資料
-        existing_df = conn.read(spreadsheet=SHEET_URL, ttl=0)
-        existing_df = existing_df.dropna(how="all") # 清除空行
-
-        # 2. 處理 2026 台灣時區時間
-        tz_taiwan = timezone(timedelta(hours=8))
-        now = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
-        
-        # 3. 建立新條目
-        new_entry = pd.DataFrame([{
-            "時間": now, 
-            "訓練員": trainer, 
-            "受測人": staff, 
-            "職位": staff_type, 
-            "崗位": pos
-        }])
-        
-        # 4. 合併舊資料與新資料
-        updated_df = pd.concat([existing_df, new_entry], ignore_index=True)
-        
-        # 5. 整份覆蓋回雲端 (這是 gspread 最穩定的更新方式)
-        conn.update(spreadsheet=SHEET_URL, data=updated_df)
-        st.success("✅ 資料已同步至雲端硬碟")
-        
-    except Exception as e:
-        st.error(f"雲端儲存失敗: {e}")
+    # 建立台北時區 (UTC+8)
+    tz_taiwan = timezone(timedelta(hours=8))
+    # 取得目前台北時間
+    now = datetime.now(tz_taiwan).strftime("%Y-%m-%d %H:%M")
+    
+    new_entry = pd.DataFrame([{
+        "時間": now, 
+        "訓練員": trainer, 
+        "受測人": staff, 
+        "職位": staff_type, 
+        "崗位": pos
+    }])
+    
+    if not os.path.exists(HISTORY_FILE):
+        new_entry.to_csv(HISTORY_FILE, index=False, encoding='utf-8-sig')
+    else:
+        new_entry.to_csv(HISTORY_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
 
 # --- 3. 資料讀取與架構初始化 ---
 @st.cache_data
@@ -144,6 +125,7 @@ staff_df, struct_df, standards_df = load_app_data()
 # --- 4. CSS 樣式控制 ---
 st.markdown("""
     <style>
+    /* 保持原有的 Streamlit 佈局和按鈕樣式 */
     .main .block-container { max-width: 500px !important; margin: auto; padding-top: 2rem; display: flex; flex-direction: column; align-items: center; }
     [data-testid="stVerticalBlock"] > div { width: 100%; display: flex; flex-direction: column; align-items: center; }
     div.stButton { width: 100%; display: flex; justify-content: center; }
@@ -155,16 +137,48 @@ st.markdown("""
     div.stButton > button:has(p:contains("✅")) { background-color: #FFADAD !important; }
     div.stButton > button:has(p:contains("🏠")) { background-color: #FDFFB6 !important; }
     
+    /* 確保考核內容標籤放大 */
     .pos-container { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 20px; width: 100%; }
-    .pos-tag { padding: 6px 12px; border-radius: 10px; font-size: 13px; background-color: #F0F2F6; border: 2px solid #DDD; color: #555; }
+    .pos-tag { 
+        padding: 12px 20px !important; 
+        border-radius: 15px !important; 
+        font-size: 20px !important; /* 從 13px 放大至 20px */
+        background-color: #F0F2F6; 
+        border: 2px solid #DDD; 
+        color: #555; 
+        line-height: 1.5 !important;
+    }
     .pos-tag-yes { border: 3px solid #9ACD32 !important; font-weight: bold !important; color: #000 !important; } 
     .pos-tag-no { border: 3px solid #FF0000 !important; font-weight: bold !important; color: #000 !important; }
 
-    .nav-bar { font-size: 13px; color: #AAA; margin-bottom: 10px; width: 100%; text-align: center; }
+    /* 確保導航欄文字放大 */
+    .nav-bar { font-size: 16px !important; color: #AAA; margin-bottom: 10px; width: 100%; text-align: center; }
     .nav-active { color: #000000; font-weight: 400; }
-    .breadcrumb { background-color: #F8F9FA; padding: 12px 15px; border-radius: 15px; font-size: 14px; color: #333; margin-bottom: 25px; width: 100%; text-align: center; border: 1px solid #EAEAEA; }
+    .breadcrumb { 
+        background-color: #F8F9FA; 
+        padding: 15px 15px !important; 
+        border-radius: 15px; 
+        font-size: 20px !important; /* 從 14px 放大至 20px */
+        color: #333; 
+        margin-bottom: 25px; 
+        width: 100%; 
+        text-align: center; 
+        border: 1px solid #EAEAEA; 
+    }
     hr { display: block !important; height: 1px !important; border: 0 !important; border-top: 1px solid #E0E0E0 !important; margin: 20px 0 !important; width: 100% !important; }
-    </style>
+
+    /* *** 關鍵修改：強制放大 st.markdown 或 st.write 產生的所有普通內容文字 *** */
+    [data-testid="stMarkdownContainer"] p {
+        font-size: 24px !important; /* 確保所有主要的考核說明文字放大 */
+        line-height: 1.6 !important; 
+    }
+
+    /* 確保按鈕文字也是平板友善的大小 */
+    div.stButton > button p {
+        font-size: 26px !important; 
+        font-weight: 600 !important; 
+    }
+</style>
     """, unsafe_allow_html=True)
 
 # --- 5. 輔助功能：帶顏色的明細表格 ---
@@ -232,7 +246,7 @@ elif st.session_state.step == 'view_staff_detail':
                     for _, row in meta.iterrows():
                         pos_status[str(row["崗位"])] = str(row["獨立操作"])
         except: pass
-    st.markdown("##### 崗位考核狀態 (草綠框:獨立操作, 紅框:未獨立, 灰框:未考核)")
+    st.markdown("##### 崗位考核狀態 (綠框:可獨立, 紅框:未獨立, 灰框:未考核)")
     raw_pos_list = (standards_df['崗位時段'].astype(str) + "-" + standards_df['崗位區域'].astype(str)).tolist()
     ordered_pos = []
     for item in raw_pos_list:
@@ -270,7 +284,7 @@ elif st.session_state.step == 'select_trainer':
 
 elif st.session_state.step == 'select_type':
     render_nav('select_type')
-    st.markdown("## 🎓 考核受測人職位")
+    st.markdown("## 🎓 受測人職位")
     if st.button("👤 正職人員"): st.session_state.staff_type = "正職人員"; st.session_state.step = 'select_name'; st.rerun()
     if st.button("👫🏻 兼職人員"): st.session_state.staff_type = "兼職人員"; st.session_state.step = 'select_name'; st.rerun()
     if st.button("⬅️ 返回"): st.session_state.step = 'select_trainer'; st.rerun()
@@ -324,9 +338,13 @@ elif st.session_state.step == 'assessment':
             # --- 核心修正：將所有邏輯封裝在按鈕觸發內 ---
             if st.button("✅ 提交考核表", key="submit_btn"):
                 if None in results.values() or indep_op is None:
-                    st.error("⚠️ 請完成評分及獨立操作選項。")
+                    st.error("⚠️ 未完成評分及獨立操作選項。")
                 else:
-                    now = datetime.now()
+                    # --- 修正時區開始 ---
+                    tw_tz = pytz.timezone('Asia/Taipei') 
+                    now = datetime.now(tw_tz) 
+                    # --- 修正時區結束 ---
+
                     staff_name = st.session_state.selected_staff
                     pos_name = f"{st.session_state.main_pos}-{st.session_state.sub_pos}"
                     file_path = os.path.join("records", f"{staff_name}_考核表.xlsx")
@@ -334,6 +352,7 @@ elif st.session_state.step == 'assessment':
                     
                     # 建立本次考核的兩組資料
                     df_trainer_new = pd.DataFrame({
+                        # 這裡的 now 已經帶有台灣時區
                         "考核日期": [now.strftime("%Y-%m-%d %H:%M")], 
                         "訓練員": [st.session_state.trainer], 
                         "崗位": [pos_name], 
@@ -375,7 +394,7 @@ elif st.session_state.step == 'assessment':
                     # 3. 儲存至歷史總表 (history_log.csv)
                     save_summary_to_history(st.session_state.trainer, staff_name, st.session_state.staff_type, pos_name)
                     
-                    # 4. 同步雲端 (GAS 噴射)
+                    # 4. 同步雲端
                     with st.spinner("正在同步雲端備份..."):
                         sync_res = sync_to_cloud(file_path, f"{staff_name}_考核表.xlsx")
                         if "Success" in sync_res:
@@ -397,4 +416,11 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
+
+
+
+
+
+
 
