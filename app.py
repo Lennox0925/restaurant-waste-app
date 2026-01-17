@@ -73,6 +73,9 @@ def upload_to_gdrive(file_path, file_name):
 # 設定時區
 TZ_TAIWAN = timezone(timedelta(hours=8))
 FILE_NAME = "history_log.csv"
+FOLDER_ID = "1Sgly7h0dw-5KwlczlBPwJmEAXMcZ0s4i"   # 請替換成目標資料夾的 ID
+TZ_TAIWAN = pytz.timezone("Asia/Taipei")
+
 
 # 檢查檔案是否存在於伺服器中
 if os.path.exists(FILE_NAME):
@@ -103,7 +106,8 @@ def get_gdrive_instance():
 def save_summary_to_history(trainer, staff, staff_type, pos):
     try:
     # 1. 搜尋檔案 (確保抓取最新狀態)
-    file_list = drive.ListFile({'q': f"title = '{FILE_NAME}' and trashed = false"}).GetList()
+    query = f"name = '{FILE_NAME}' and trashed = false and '{FOLDER_ID}' in parents"
+    file_list = drive.ListFile({'q': query}).GetList()
 
     if file_list:
         # 檔案存在，讀取舊資料
@@ -118,7 +122,10 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
         # 檔案不存在，建立新 DataFrame
         st.warning("找不到現有檔案，將建立新檔。")
         df = pd.DataFrame(columns=["時間", "訓練員", "受測人", "職位", "崗位"])
-        gfile = drive.CreateFile({'title': FILE_NAME})
+        gfile = drive.CreateFile({
+            'title': FILE_NAME,
+            'parents': [{'id': FOLDER_ID}]
+        })
 
     # 2. 準備新資料
     now = datetime.now(TZ_TAIWAN).strftime("%Y-%m-%d %H:%M")
@@ -130,16 +137,17 @@ def save_summary_to_history(trainer, staff, staff_type, pos):
         "崗位": pos
     }])
 
-    # 3. 合併資料 (排除空欄位問題)
+    # 3. 合併資料
     df = pd.concat([df, new_entry], ignore_index=True)
 
-    # 4. 寫入雲端 (確保 utf-8-sig 編碼，Excel 可開)
+    # 4. 寫入雲端 (utf-8-sig 編碼，Excel 可開)
     csv_output = df.to_csv(index=False, encoding='utf-8-sig')
     gfile.SetContentString(csv_output)
     gfile.Upload()  # 執行上傳
 
     # 5. 強制刷新雲端狀態確認
     gfile.FetchMetadata()
+    print("✅ File uploaded, ID:", gfile['id'])
 
     # 6. 成功提示
     st.success(f"✅ 資料已成功同步至 Google Drive！(目前總筆數: {len(df)})")
@@ -156,14 +164,6 @@ except Exception as e:
     st.error(f"❌ 寫入失敗: {str(e)}")
     print(f"Error Detail: {e}")
 
-        
-        # 6. 提供即時下載按鈕 (讓你在 Streamlit 介面就能直接下載確認)
-        st.download_button(
-            label="📥 下載最新歷史紀錄備份 (CSV)",
-            data=csv_output,
-            file_name=f"history_log_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
         
     except Exception as e:
         st.error(f"❌ 寫入失敗: {str(e)}")
@@ -506,6 +506,7 @@ elif st.session_state.step == 'assessment':
         except Exception as e:
             st.warning(f"⚠️ 發生錯誤: {e}")
             if st.button("⬅️ 返回"): st.session_state.step = 'select_sub_pos'; st.rerun()
+
 
 
 
